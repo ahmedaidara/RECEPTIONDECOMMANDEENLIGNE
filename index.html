@@ -281,6 +281,66 @@
                 margin-left: 70px;
             }
         }
+      
+              /* Modal confirmation */
+        .confirm-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .confirm-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+        .confirm-content input {
+            width: 100%;
+            padding: 12px;
+            margin: 20px 0;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+        }
+        .btn-confirm {
+            background: #dc2626;
+            color: white;<button id=
+            border: none;
+            padding: 12px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .btn-cancel {
+            background: #666;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .warning-text {
+            color: #dc2626;
+            font-weight: bold;
+            margin: 15px 0;
+        }
+      
+      .btn-delete {
+    background: #dc2626;
+    color: white;
+}
+.btn-delete:hover {
+    background: #b91c1c;
+}
     </style>
 </head>
 <body>
@@ -298,6 +358,9 @@
         <div class="nav-item" data-section="production">
             <i class="fas fa-boxes"></i> <span>Productions</span>
         </div>
+                  <button id="resetAllBtn" style="background: #dc2626; color: white; margin-left: auto;" onclick="resetAllData()">
+                <i class="fas fa-trash-alt"></i> 🗑️ Réinitialiser tout
+            </button>
     </div>
 
     <div class="main-content">
@@ -482,6 +545,7 @@
                             <button class="btn-action btn-payer" onclick="openPaymentModal('${order.id}', ${order.total || 0})">💰 Payer</button>
                             <button class="btn-action btn-details" onclick="viewDetails('${order.id}')">📋 Détails</button>
                             <button class="btn-action btn-pdf" onclick="generateOrderPDF('${order.id}')">📄 PDF</button>
+                                                        <button class="btn-action btn-delete" onclick="deleteOrder('${order.id}')" style="background:#dc2626;">🗑️ Supprimer</button>
                         </td>
                     </tr>
                 `;
@@ -850,7 +914,122 @@
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 2000);
         }
-
+        // ========== RÉINITIALISATION TOTALE (TOUTES LES COMMANDES) ==========
+        async function resetAllData() {
+            // Créer la modal de confirmation
+            const modal = document.createElement('div');
+            modal.className = 'confirm-modal';
+            modal.innerHTML = `
+                <div class="confirm-content">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #dc2626; margin-bottom: 15px;"></i>
+                    <h2 style="color: #1a1a2e;">⚠️ RÉINITIALISATION TOTALE</h2>
+                    <p style="margin: 15px 0; color: #666;">Cette action est <strong style="color:#dc2626;">IRRÉVERSIBLE</strong> et va supprimer :</p>
+                    <ul style="text-align: left; margin: 15px 0; padding-left: 20px; color: #666;">
+                        <li>📦 TOUTES les commandes TikTok Shop</li>
+                        <li>🧾 TOUTES les factures associées</li>
+                        <li>💰 TOUS les paiements enregistrés</li>
+                        <li>📊 TOUTES les statistiques</li>
+                        <li>🏷️ TOUS les suivis de commande</li>
+                    </ul>
+                    <div class="warning-text">⚠️ Cette action est définitive ! ⚠️<br>Pour confirmer, tapez : <strong>"SUPPRIMER TOUT"</strong></div>
+                    <input type="text" id="confirmResetInput" placeholder="Tapez SUPPRIMER TOUT ici" autocomplete="off" style="margin: 20px 0; padding: 12px; width: 100%; border: 2px solid #e0e0e0; border-radius: 10px;">
+                    <div style="margin-top: 20px;">
+                        <button class="btn-confirm" id="confirmResetBtn" style="background: #dc2626; color: white; border: none; padding: 12px 25px; border-radius: 10px; cursor: pointer; margin-right: 10px;">🗑️ OUI, TOUT SUPPRIMER</button>
+                        <button class="btn-cancel" id="cancelResetBtn" style="background: #666; color: white; border: none; padding: 12px 25px; border-radius: 10px; cursor: pointer;">Annuler</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Gestionnaire pour le bouton Annuler
+            document.getElementById('cancelResetBtn').onclick = () => {
+                modal.remove();
+                showToast('❌ Réinitialisation annulée');
+            };
+            
+            // Fermer en cliquant en dehors
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                    showToast('❌ Réinitialisation annulée');
+                }
+            };
+            
+            // Gestionnaire pour le bouton Confirmer
+            document.getElementById('confirmResetBtn').onclick = async () => {
+                const input = document.getElementById('confirmResetInput');
+                const confirmationText = input.value.trim();
+                
+                if (confirmationText !== 'SUPPRIMER TOUT') {
+                    showToast('❌ Tapez exactement "SUPPRIMER TOUT" pour confirmer', 'error');
+                    input.style.borderColor = '#dc2626';
+                    return;
+                }
+                
+                // Désactiver les boutons pendant l'opération
+                const confirmBtn = document.getElementById('confirmResetBtn');
+                const cancelBtn = document.getElementById('cancelResetBtn');
+                confirmBtn.disabled = true;
+                cancelBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Suppression en cours...';
+                
+                try {
+                    showToast('⚠️ Suppression de toutes les commandes...', 'warning');
+                    
+                    // 1. Récupérer TOUTES les commandes TikTok Shop
+                    const ordersSnapshot = await db.collection('orders')
+                        .where('boutique', '==', 'en-ligne')
+                        .get();
+                    
+                    const orderIds = [];
+                    ordersSnapshot.forEach(doc => orderIds.push(doc.id));
+                    
+                    // 2. Supprimer TOUTES les commandes
+                    let deletedOrders = 0;
+                    for (const orderId of orderIds) {
+                        await db.collection('orders').doc(orderId).delete();
+                        deletedOrders++;
+                    }
+                    
+                    // 3. Récupérer et supprimer TOUTES les factures associées
+                    const invoicesSnapshot = await db.collection('invoices')
+                        .where('boutique', '==', 'en-ligne')
+                        .get();
+                    
+                    let deletedInvoices = 0;
+                    for (const doc of invoicesSnapshot.docs) {
+                        await db.collection('invoices').doc(doc.id).delete();
+                        deletedInvoices++;
+                    }
+                    
+                    // 4. Supprimer aussi le localStorage des clients
+                    localStorage.removeItem('dakar_chicken_user_info');
+                    localStorage.removeItem('dakar_chicken_cart');
+                    localStorage.removeItem('dakar_chicken_quantities');
+                    localStorage.removeItem('lastOrderId');
+                    localStorage.removeItem('lastOrderData');
+                    
+                    // 5. Vider le tableau local
+                    allOrders = [];
+                    
+                    // 6. Mettre à jour l'affichage
+                    displayOrders([]);
+                    document.getElementById('totalOrders').textContent = '0';
+                    document.getElementById('pendingOrders').textContent = '0';
+                    document.getElementById('deliveringOrders').textContent = '0';
+                    document.getElementById('deliveredOrders').textContent = '0';
+                    document.getElementById('totalRevenue').textContent = '0 F CFA';
+                    
+                    modal.remove();
+                    showToast(`✅ SUPPRESSION COMPLÈTE ! ${deletedOrders} commande(s) et ${deletedInvoices} facture(s) supprimées.`, 'success');
+                    
+                } catch (error) {
+                    console.error('Erreur lors de la suppression:', error);
+                    showToast('❌ Erreur: ' + error.message, 'error');
+                    modal.remove();
+                }
+            };
+        }
         // ========== INITIALISATION ==========
         async function init() {
             await loadProductions();
@@ -914,7 +1093,67 @@
                 }
             };
         });
-
+        // ========== SUPPRIMER UNE COMMANDE COMPLÈTEMENT ==========
+        async function deleteOrder(orderId) {
+            // Demander confirmation
+            const confirmation = prompt(`⚠️ SUPPRESSION DÉFINITIVE ⚠️\n\nCette action va supprimer :\n- La commande\n- La facture associée\n- Le suivi pour le client\n\nTapez "SUPPRIMER" pour confirmer :`);
+            
+            if (confirmation !== "SUPPRIMER") {
+                showToast('❌ Suppression annulée');
+                return;
+            }
+            
+            try {
+                // 1. Récupérer la commande pour avoir le numéro
+                const orderDoc = await db.collection('orders').doc(orderId).get();
+                if (!orderDoc.exists) {
+                    showToast('Commande non trouvée', 'error');
+                    return;
+                }
+                
+                const order = orderDoc.data();
+                const orderNumber = order.orderNumber || orderId.slice(0,8);
+                
+                // 2. Supprimer la commande
+                await db.collection('orders').doc(orderId).delete();
+                console.log('✅ Commande supprimée:', orderId);
+                
+                // 3. Supprimer la facture associée (si elle existe)
+                const invoicesSnapshot = await db.collection('invoices')
+                    .where('orderId', '==', orderId)
+                    .get();
+                
+                let deletedInvoices = 0;
+                for (const doc of invoicesSnapshot.docs) {
+                    await db.collection('invoices').doc(doc.id).delete();
+                    deletedInvoices++;
+                    console.log('✅ Facture supprimée:', doc.id);
+                }
+                
+                // 4. Mettre à jour l'affichage
+                const index = allOrders.findIndex(o => o.id === orderId);
+                if (index !== -1) {
+                    allOrders.splice(index, 1);
+                }
+                
+                // 5. Recharger l'affichage
+                filterOrders();
+                
+                // 6. Mettre à jour les stats
+                const totalCA = allOrders.reduce((sum, o) => sum + (o.paymentReceived || 0), 0);
+                document.getElementById('totalOrders').textContent = allOrders.length;
+                document.getElementById('totalRevenue').textContent = totalCA.toLocaleString('fr-FR') + ' F CFA';
+                document.getElementById('pendingOrders').textContent = allOrders.filter(o => o.status === 'en_attente').length;
+                document.getElementById('deliveringOrders').textContent = allOrders.filter(o => o.status === 'en_livraison').length;
+                document.getElementById('deliveredOrders').textContent = allOrders.filter(o => o.status === 'livre').length;
+                
+                showToast(`✅ Commande ${orderNumber} supprimée ! ${deletedInvoices} facture(s) supprimée(s).`, 'success');
+                
+            } catch (error) {
+                console.error('Erreur:', error);
+                showToast('❌ Erreur: ' + error.message, 'error');
+            }
+        }
         // Démarrer l'application
         init();
     </script>
