@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -19,7 +20,6 @@
             font-family: 'Segoe UI', sans-serif;
         }
 
-        /* Sidebar */
         .sidebar {
             position: fixed;
             left: 0;
@@ -76,13 +76,11 @@
             font-size: 1.2rem;
         }
 
-        /* Main content */
         .main-content {
             margin-left: 260px;
             padding: 20px;
         }
 
-        /* Header */
         .main-header {
             background: white;
             padding: 20px;
@@ -121,7 +119,6 @@
             margin-top: 5px;
         }
 
-        /* Filtres */
         .filters {
             display: flex;
             gap: 10px;
@@ -143,7 +140,6 @@
             color: white;
         }
 
-        /* Tableau */
         .orders-table {
             background: white;
             border-radius: 15px;
@@ -210,11 +206,9 @@
         .btn-livraison { background: #2563eb; color: white; }
         .btn-livre { background: #059669; color: white; }
         .btn-payer { background: #10b981; color: white; }
-        .btn-partiel { background: #f59e0b; color: white; }
-        .btn-impayer { background: #ef4444; color: white; }
         .btn-details { background: #8b5cf6; color: white; }
+        .btn-pdf { background: #dc2626; color: white; }
 
-        /* Modal détails */
         .modal {
             display: none;
             position: fixed;
@@ -258,17 +252,18 @@
             cursor: pointer;
         }
 
-        .payment-input {
-            display: flex;
-            gap: 10px;
-            margin: 15px 0;
-        }
-
-        .payment-input input {
-            flex: 1;
-            padding: 10px;
+        .production-card {
             border: 2px solid #e0e0e0;
-            border-radius: 8px;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .production-card:hover {
+            border-color: #f5a623;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
 
         @media (max-width: 768px) {
@@ -300,11 +295,14 @@
         <div class="nav-item" data-section="stats">
             <i class="fas fa-chart-line"></i> <span>Statistiques</span>
         </div>
+        <div class="nav-item" data-section="production">
+            <i class="fas fa-boxes"></i> <span>Productions</span>
+        </div>
     </div>
 
     <div class="main-content">
         <div class="main-header">
-            <h1><i class="fas fa-tachometer-alt"></i> Tableau de bord</h1>
+            <h1><i class="fas fa-tachometer-alt"></i> Tableau de bord - TIKTOK SHOP</h1>
             <div id="realtimeStatus"><i class="fas fa-circle" style="color: #10b981;"></i> Synchro temps réel</div>
         </div>
 
@@ -327,7 +325,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="totalRevenue">0 F CFA</div>
-                <div class="stat-label">CA total</div>
+                <div class="stat-label">CA total (perçu)</div>
             </div>
         </div>
 
@@ -336,6 +334,9 @@
             <button class="filter-btn" data-status="en_attente">En attente</button>
             <button class="filter-btn" data-status="en_livraison">En livraison</button>
             <button class="filter-btn" data-status="livre">Livrées</button>
+            <button class="filter-btn" data-status="production" id="selectProductionBtn" style="background: #f5a623; color: white;">
+                <i class="fas fa-plus"></i> Choisir production
+            </button>
         </div>
 
         <div class="orders-table">
@@ -346,19 +347,19 @@
                         <th>Client</th>
                         <th>Téléphone</th>
                         <th>Total</th>
+                        <th>Production</th>
                         <th>Statut livraison</th>
                         <th>Paiement</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="ordersTableBody">
-                    <tr><td colspan="7" style="text-align: center;">Chargement...</td</tr>
+                    <tr><td colspan="8" style="text-align: center;">Chargement...</td</tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Modal détails commande -->
     <div class="modal" id="orderModal">
         <div class="modal-content">
             <div class="modal-header">
@@ -366,6 +367,16 @@
                 <button class="close-modal" onclick="closeModal()">&times;</button>
             </div>
             <div id="orderDetails"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="productionModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-boxes"></i> Sélectionner une production</h2>
+                <button class="close-modal" onclick="closeProductionModal()">&times;</button>
+            </div>
+            <div id="productionList"></div>
         </div>
     </div>
 
@@ -383,45 +394,47 @@
 
         let allOrders = [];
         let currentFilter = 'all';
+        let allProductions = [];
+        let currentProductionId = null;
+        let currentProductionData = null;
 
-        // Écoute en temps réel
-        db.collection('orders').orderBy('createdAt', 'desc')
-            .onSnapshot(snapshot => {
-                console.log('Mise à jour temps réel:', snapshot.size);
-                allOrders = [];
-                snapshot.forEach(doc => {
-                    allOrders.push({ id: doc.id, ...doc.data() });
-                });
-                updateStats();
-                filterOrders();
-            });
-
-        function updateStats() {
-            const total = allOrders.length;
-            const pending = allOrders.filter(o => o.status === 'en_attente').length;
-            const delivering = allOrders.filter(o => o.status === 'en_livraison').length;
-            const delivered = allOrders.filter(o => o.status === 'livre').length;
-            const revenue = allOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-
-            document.getElementById('totalOrders').textContent = total;
-            document.getElementById('pendingOrders').textContent = pending;
-            document.getElementById('deliveringOrders').textContent = delivering;
-            document.getElementById('deliveredOrders').textContent = delivered;
-            document.getElementById('totalRevenue').textContent = revenue.toLocaleString('fr-FR') + ' F CFA';
-        }
-
-        function filterOrders() {
-            let filtered = allOrders;
-            if (currentFilter !== 'all') {
-                filtered = allOrders.filter(o => o.status === currentFilter);
+        // ========== CHARGEMENT DES PRODUCTIONS ==========
+        async function loadProductions() {
+            try {
+                const snapshot = await db.collection('stocks_attribues')
+                    .where('boutique', '==', 'en-ligne')
+                    .get();
+                
+                allProductions = [];
+                for (const doc of snapshot.docs) {
+                    const stock = doc.data();
+                    const prodDoc = await db.collection('poulailler_records').doc(stock.productionId).get();
+                    if (prodDoc.exists) {
+                        allProductions.push({
+                            id: stock.productionId,
+                            stockId: doc.id,
+                            name: prodDoc.data().productionName || `Production du ${new Date(prodDoc.data().startDate).toLocaleDateString('fr-FR')}`,
+                            date: prodDoc.data().startDate
+                        });
+                    }
+                }
+                
+                allProductions.sort((a, b) => new Date(b.date) - new Date(a.date));
+                
+                if (allProductions.length > 0) {
+                    currentProductionId = allProductions[0].id;
+                    console.log('Production par défaut:', currentProductionId);
+                }
+            } catch (error) {
+                console.error('Erreur chargement productions:', error);
             }
-            displayOrders(filtered);
         }
 
+        // ========== AFFICHAGE DES COMMANDES ==========
         function displayOrders(orders) {
             const tbody = document.getElementById('ordersTableBody');
             if (orders.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucune commande</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Aucune commande</td></tr>';
                 return;
             }
 
@@ -450,6 +463,17 @@
                         <td>${order.client?.name || 'N/A'}</td>
                         <td>${order.client?.phone || 'N/A'}</td>
                         <td style="font-weight: bold; color: #f5a623;">${(order.total || 0).toLocaleString('fr-FR')} F CFA</td>
+                        <td>
+                            <select onchange="updateOrderProduction('${order.id}', this.value)" 
+                                    style="padding: 5px; border-radius: 5px; border: 1px solid #ddd; background: white; font-size: 0.7rem;">
+                                ${allProductions.map(prod => `
+                                    <option value="${prod.id}" ${(order.productionId || currentProductionId) === prod.id ? 'selected' : ''}>
+                                        ${prod.name.substring(0, 25)}
+                                    </option>
+                                `).join('')}
+                                ${allProductions.length === 0 ? '<option value="">Chargement...</option>' : ''}
+                            </select>
+                        </td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td><span class="payment-badge ${paymentClass}">${paymentText}</span></td>
                         <td class="action-buttons">
@@ -457,47 +481,137 @@
                             <button class="btn-action btn-livre" onclick="updateStatus('${order.id}', 'livre')">✅ Livrée</button>
                             <button class="btn-action btn-payer" onclick="openPaymentModal('${order.id}', ${order.total || 0})">💰 Payer</button>
                             <button class="btn-action btn-details" onclick="viewDetails('${order.id}')">📋 Détails</button>
+                            <button class="btn-action btn-pdf" onclick="generateOrderPDF('${order.id}')">📄 PDF</button>
                         </td>
                     </tr>
                 `;
             }).join('');
         }
 
-        function updateStatus(orderId, newStatus) {
+        function filterOrders() {
+            let filtered = allOrders;
+            if (currentFilter !== 'all') {
+                filtered = allOrders.filter(o => o.status === currentFilter);
+            }
+            displayOrders(filtered);
+        }
+
+               function updateStatus(orderId, newStatus) {
             db.collection('orders').doc(orderId).update({
                 status: newStatus,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                syncToInvoice(orderId); // ← AJOUTE CETTE LIGNE
             });
             showToast(`Statut mis à jour: ${newStatus === 'en_livraison' ? 'En livraison' : 'Livrée'}`);
         }
 
-        function openPaymentModal(orderId, total) {
-            const payment = prompt(`Montant reçu (Total: ${total.toLocaleString('fr-FR')} F CFA) :`, '0');
-            if (payment !== null) {
-                const amount = parseInt(payment);
-                if (isNaN(amount)) return;
-                
-                let paymentStatus = 'impaye';
-                let paymentReceived = amount;
-                let paymentRemaining = total - amount;
-                
-                if (amount >= total) {
-                    paymentStatus = 'paye';
-                    paymentRemaining = 0;
-                } else if (amount > 0) {
-                    paymentStatus = 'partiel';
-                }
-                
-                db.collection('orders').doc(orderId).update({
-                    paymentStatus: paymentStatus,
-                    paymentReceived: paymentReceived,
-                    paymentRemaining: paymentRemaining,
+        async function updateOrderProduction(orderId, productionId) {
+            try {
+                const prod = allProductions.find(p => p.id === productionId);
+                await db.collection('orders').doc(orderId).update({
+                    productionId: productionId,
+                    productionName: prod?.name || productionId,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
-                showToast(`Paiement enregistré: ${amount.toLocaleString('fr-FR')} F CFA`);
+                showToast(`Production mise à jour: ${prod?.name || productionId}`);
+            } catch (error) {
+                console.error('Erreur:', error);
+                showToast('Erreur lors de la mise à jour', 'error');
             }
         }
 
+               function openPaymentModal(orderId, total) {
+            db.collection('orders').doc(orderId).get().then(doc => {
+                if (!doc.exists) return;
+                
+                const order = doc.data();
+                const montantActuel = order.paymentReceived || 0;
+                
+                const message = `Montant actuel: ${montantActuel.toLocaleString('fr-FR')} F CFA\nTotal commande: ${total.toLocaleString('fr-FR')} F CFA\n\nNouveau montant payé (écrase l'ancien) :`;
+                const payment = prompt(message, montantActuel);
+                
+                if (payment !== null) {
+                    let newAmount = parseInt(payment);
+                    if (isNaN(newAmount)) newAmount = 0;
+                    if (newAmount < 0) newAmount = 0;
+                    
+                    let paymentStatus = 'impaye';
+                    let paymentRemaining = total - newAmount;
+                    
+                    if (newAmount >= total) {
+                        paymentStatus = 'paye';
+                        paymentRemaining = 0;
+                    } else if (newAmount > 0) {
+                        paymentStatus = 'partiel';
+                    }
+                    
+                    db.collection('orders').doc(orderId).update({
+                        paymentStatus: paymentStatus,
+                        paymentReceived: newAmount,
+                        paymentRemaining: paymentRemaining,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    }).then(() => {
+                        syncToInvoice(orderId); // ← AJOUTE CETTE LIGNE
+                        showToast(`💰 Montant payé: ${newAmount.toLocaleString('fr-FR')} F CFA | Reste: ${paymentRemaining.toLocaleString('fr-FR')} F CFA`);
+                    }).catch(error => {
+                        showToast('Erreur: ' + error.message, 'error');
+                    });
+                }
+            }).catch(error => {
+                console.error('Erreur:', error);
+                showToast('Erreur lors du chargement de la commande', 'error');
+            });
+        }
+        // ========== SYNCHRONISATION AVEC LES FACTURES ==========
+        async function syncToInvoice(orderId) {
+            try {
+                const orderDoc = await db.collection('orders').doc(orderId).get();
+                if (!orderDoc.exists) return;
+                
+                const order = orderDoc.data();
+                
+                // Vérifier si une facture existe déjà
+                const existingInvoice = await db.collection('invoices')
+                    .where('orderId', '==', orderId)
+                    .get();
+                
+                const invoiceData = {
+                    orderId: orderId,
+                    boutique: 'en-ligne',
+                    boutiqueName: 'TIKTOK SHOP',
+                    boutiquePhone: '77 777 77 82',
+                    client: order.client || { name: 'Client TikTok', phone: 'Non renseigné' },
+                    items: order.items || [],
+                    total: order.total || 0,
+                    invoiceNumber: order.orderNumber || `INV-${orderId.slice(0,8)}`,
+                    paiement: {
+                        montantPaye: order.paymentReceived || 0,
+                        resteAPayer: (order.paymentRemaining || order.total || 0),
+                        modePaiement: order.paymentMethod || 'especes',
+                        statut: order.paymentStatus || 'impaye',
+                        datePaiement: new Date().toISOString()
+                    },
+                    status: order.status === 'livre' ? 'completed' : 'pending',
+                    productionId: order.productionId || null,
+                    createdAt: order.createdAt || firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                if (!existingInvoice.empty) {
+                    // Mettre à jour la facture existante
+                    const invoiceId = existingInvoice.docs[0].id;
+                    await db.collection('invoices').doc(invoiceId).update(invoiceData);
+                    console.log('✅ Facture mise à jour:', invoiceId);
+                } else {
+                    // Créer une nouvelle facture
+                    const newInvoice = await db.collection('invoices').add(invoiceData);
+                    console.log('✅ Nouvelle facture créée:', newInvoice.id);
+                }
+            } catch (error) {
+                console.error('Erreur synchro facture:', error);
+            }
+        }
         async function viewDetails(orderId) {
             const doc = await db.collection('orders').doc(orderId).get();
             if (!doc.exists) return;
@@ -506,9 +620,11 @@
             const date = order.createdAt?.toDate() || new Date();
             
             let itemsHtml = '<table style="width:100%; border-collapse:collapse;"><tr><th>Article</th><th>Qté</th><th>Prix</th><th>Total</th></tr>';
-            order.items.forEach(item => {
-                itemsHtml += `<tr><td>${item.name}</td><td>${item.quantity}</td><td>${item.price.toLocaleString('fr-FR')}</td><td>${item.subtotal.toLocaleString('fr-FR')}</td></tr>`;
-            });
+            if (order.items && order.items.length > 0) {
+                order.items.forEach(item => {
+                    itemsHtml += `<tr><td>${item.name}</td><td>${item.quantity}</td><td>${item.price.toLocaleString('fr-FR')}</td><td>${item.subtotal.toLocaleString('fr-FR')}</td></tr>`;
+                });
+            }
             itemsHtml += '</table>';
             
             document.getElementById('orderDetails').innerHTML = `
@@ -517,33 +633,215 @@
                     <p><strong>Date:</strong> ${date.toLocaleString('fr-FR')}</p>
                     <p><strong>Client:</strong> ${order.client?.name}</p>
                     <p><strong>Téléphone:</strong> ${order.client?.phone}</p>
-                    <p><strong>Adresse:</strong> ${order.client?.address}</p>
-                    ${order.client?.email ? `<p><strong>Email:</strong> ${order.client.email}</p>` : ''}
+                    <p><strong>Adresse:</strong> ${order.client?.address || 'Non renseignée'}</p>
                 </div>
                 <h4>Articles commandés:</h4>
                 ${itemsHtml}
                 <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
                     <p><strong>Total:</strong> ${order.total.toLocaleString('fr-FR')} F CFA</p>
+                    <p><strong>Montant reçu:</strong> ${(order.paymentReceived || 0).toLocaleString('fr-FR')} F CFA</p>
+                    <p><strong>Reste à payer:</strong> ${(order.paymentRemaining || order.total).toLocaleString('fr-FR')} F CFA</p>
                     <p><strong>Statut livraison:</strong> ${order.status === 'en_attente' ? 'En attente' : order.status === 'en_livraison' ? 'En livraison' : 'Livrée'}</p>
-                    <p><strong>Paiement:</strong> ${order.paymentStatus === 'paye' ? 'Payé' : order.paymentStatus === 'partiel' ? `Partiel (${order.paymentReceived?.toLocaleString('fr-FR')} F CFA reçu)` : 'Impayé'}</p>
-                    ${order.paymentRemaining > 0 ? `<p style="color:#f59e0b;"><strong>Reste à payer:</strong> ${order.paymentRemaining.toLocaleString('fr-FR')} F CFA</p>` : ''}
+                    <p><strong>Production:</strong> ${order.productionName || order.productionId || 'Non spécifiée'}</p>
                 </div>
             `;
             document.getElementById('orderModal').classList.add('active');
         }
 
+        async function openProductionModal() {
+            document.getElementById('productionModal').classList.add('active');
+            document.getElementById('productionList').innerHTML = '<div style="text-align:center;padding:40px;"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+            
+            try {
+                const snapshot = await db.collection('stocks_attribues')
+                    .where('boutique', '==', 'en-ligne')
+                    .where('status', '==', 'active')
+                    .get();
+                
+                if (snapshot.empty) {
+                    document.getElementById('productionList').innerHTML = `
+                        <div style="text-align:center;padding:40px;color:#999;">
+                            <i class="fas fa-box-open" style="font-size:3rem;"></i>
+                            <p>Aucune production disponible pour TikTok Shop</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '';
+                for (const doc of snapshot.docs) {
+                    const stock = doc.data();
+                    const prodDoc = await db.collection('poulailler_records').doc(stock.productionId).get();
+                    const production = prodDoc.data();
+                    
+                    const date = production?.startDate ? new Date(production.startDate) : new Date();
+                    const dateStr = `${date.getDate()}/${date.getMonth()+1}/${date.getFullYear()}`;
+                    const stockTotal = stock.total || 0;
+                    const stockVendu = stock.totalSold || 0;
+                    const stockRestant = stockTotal - stockVendu;
+                    
+                    html += `
+                        <div class="production-card" onclick="selectProduction('${doc.id}', '${stock.productionId}', '${production?.productionName || 'Production ' + dateStr}')">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <div style="font-weight:bold;">${production?.productionName || 'Production du ' + dateStr}</div>
+                                    <div style="font-size:0.8rem; color:#666;">Stock restant: <strong style="color:${stockRestant > 0 ? '#10b981' : '#ef4444'}">${stockRestant}</strong> / ${stockTotal}</div>
+                                </div>
+                                <div style="background:#f5a62320; padding:5px 10px; border-radius:8px;">
+                                    <i class="fas fa-check-circle" style="color:#f5a623;"></i> Sélectionner
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('productionList').innerHTML = html;
+            } catch (error) {
+                console.error('Erreur:', error);
+                document.getElementById('productionList').innerHTML = `<div style="text-align:center;padding:40px;color:red;">Erreur: ${error.message}</div>`;
+            }
+        }
+        
+        async function selectProduction(stockId, productionId, productionName) {
+            currentProductionId = productionId;
+            currentProductionData = { stockId, productionId, productionName };
+            closeProductionModal();
+            showToast(`Production sélectionnée: ${productionName}`);
+            
+            const prodBtn = document.querySelector('#selectProductionBtn');
+            if (prodBtn) {
+                prodBtn.innerHTML = `<i class="fas fa-check"></i> ${productionName.substring(0, 20)}`;
+                prodBtn.style.background = '#10b981';
+            }
+        }
+        
+        function closeProductionModal() {
+            document.getElementById('productionModal').classList.remove('active');
+        }
+
+        async function generateOrderPDF(orderId) {
+            const doc = await db.collection('orders').doc(orderId).get();
+            if (!doc.exists) return;
+            
+            const order = doc.data();
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF();
+            
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const margin = 15;
+            let y = 20;
+            
+            try {
+                pdf.addImage('https://i.postimg.cc/0QBKNcGj/photo-5782651308169956527-x.jpg', 'JPEG', margin, y, 25, 25);
+            } catch(e) {}
+            
+            pdf.setFontSize(20);
+            pdf.setFont("helvetica", "bold");
+            pdf.text("DAKAR CHICKEN EXPRESS", pageWidth / 2, y + 10, { align: 'center' });
+            
+            pdf.setFontSize(12);
+            pdf.setTextColor(245, 166, 35);
+            pdf.text("TIKTOK SHOP", pageWidth / 2, y + 20, { align: 'center' });
+            
+            pdf.setTextColor(0, 0, 0);
+            pdf.setFontSize(10);
+            pdf.text(`Tél: 77 777 77 82`, pageWidth / 2, y + 28, { align: 'center' });
+            
+            y += 45;
+            
+            pdf.setFontSize(14);
+            pdf.setFont("helvetica", "bold");
+            pdf.text("BON DE COMMANDE", margin, y);
+            y += 10;
+            
+            pdf.setFontSize(10);
+            pdf.setFont("helvetica", "normal");
+            pdf.text(`N°: ${order.orderNumber || order.id.slice(0,8)}`, margin, y);
+            const date = order.createdAt?.toDate() || new Date();
+            pdf.text(`Date: ${date.toLocaleDateString('fr-FR')}`, pageWidth - margin, y, { align: 'right' });
+            y += 10;
+            pdf.text(`Heure: ${date.toLocaleTimeString('fr-FR')}`, pageWidth - margin, y, { align: 'right' });
+            y += 15;
+            
+            pdf.setFont("helvetica", "bold");
+            pdf.text("CLIENT", margin, y);
+            y += 7;
+            pdf.setFont("helvetica", "normal");
+            pdf.text(`Nom: ${order.client?.name || 'Non renseigné'}`, margin + 5, y);
+            y += 6;
+            pdf.text(`Tél: ${order.client?.phone || 'Non renseigné'}`, margin + 5, y);
+            y += 6;
+            if (order.client?.address) {
+                pdf.text(`Adresse: ${order.client.address}`, margin + 5, y);
+                y += 10;
+            } else {
+                y += 10;
+            }
+            
+            pdf.setFont("helvetica", "bold");
+            pdf.text("ARTICLES COMMANDÉS", margin, y);
+            y += 10;
+            
+            pdf.setFillColor(245, 166, 35);
+            pdf.rect(margin, y, pageWidth - (margin * 2), 10, 'F');
+            pdf.setTextColor(255, 255, 255);
+            pdf.text("Description", margin + 5, y + 7);
+            pdf.text("Qté", margin + 100, y + 7);
+            pdf.text("P.U.", margin + 130, y + 7);
+            pdf.text("Total", pageWidth - margin - 25, y + 7, { align: 'right' });
+            y += 10;
+            
+            pdf.setTextColor(0, 0, 0);
+            pdf.setFont("helvetica", "normal");
+            if (order.items) {
+                order.items.forEach(item => {
+                    pdf.text(`${item.name} (${item.weight})`, margin + 5, y);
+                    pdf.text(item.quantity.toString(), margin + 100, y);
+                    pdf.text(`${item.price.toLocaleString('fr-FR')}`, margin + 130, y);
+                    pdf.text(`${item.subtotal.toLocaleString('fr-FR')} F`, pageWidth - margin - 25, y, { align: 'right' });
+                    y += 8;
+                });
+            }
+            
+            y += 10;
+            pdf.line(margin, y, pageWidth - margin, y);
+            y += 10;
+            
+            pdf.setFontSize(12);
+            pdf.setFont("helvetica", "bold");
+            pdf.text("TOTAL:", pageWidth - margin - 60, y);
+            pdf.setTextColor(245, 166, 35);
+            pdf.text(`${(order.total || 0).toLocaleString('fr-FR')} F CFA`, pageWidth - margin, y, { align: 'right' });
+            
+            y += 20;
+            
+            pdf.setFontSize(10);
+            pdf.setTextColor(0, 0, 0);
+            pdf.text(`Mode de paiement: ${order.paymentMethod === 'wave' ? 'Wave' : order.paymentMethod === 'orange' ? 'Orange Money' : 'Espèces'}`, margin, y);
+            y += 7;
+            pdf.text(`Montant reçu: ${(order.paymentReceived || 0).toLocaleString('fr-FR')} F CFA`, margin, y);
+            y += 7;
+            const reste = (order.total || 0) - (order.paymentReceived || 0);
+            if (reste > 0) {
+                pdf.setTextColor(220, 38, 38);
+                pdf.text(`Reste à payer: ${reste.toLocaleString('fr-FR')} F CFA`, margin, y);
+            } else {
+                pdf.setTextColor(16, 185, 129);
+                pdf.text("✓ Payé intégralement", margin, y);
+            }
+            
+            pdf.setTextColor(150, 150, 150);
+            pdf.setFontSize(8);
+            pdf.text("Merci pour votre commande !", pageWidth / 2, 280, { align: 'center' });
+            pdf.text("DAKAR CHICKEN EXPRESS - TikTok Shop", pageWidth / 2, 285, { align: 'center' });
+            
+            pdf.save(`Commande_${order.orderNumber || order.id.slice(0,8)}.pdf`);
+            showToast('PDF généré avec succès');
+        }
+        
         function closeModal() {
             document.getElementById('orderModal').classList.remove('active');
         }
-
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.onclick = () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentFilter = btn.getAttribute('data-status');
-                filterOrders();
-            };
-        });
 
         function showToast(msg) {
             const toast = document.createElement('div');
@@ -553,19 +851,72 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
+        // ========== INITIALISATION ==========
+        async function init() {
+            await loadProductions();
+            
+            db.collection('orders')
+                .where('boutique', '==', 'en-ligne')
+                .onSnapshot(snapshot => {
+                    console.log('🔄 Mise à jour commandes TikTok:', snapshot.size);
+                    allOrders = [];
+                    let totalCA = 0;
+                    
+                    snapshot.forEach(doc => {
+                        const order = { id: doc.id, ...doc.data() };
+                        if (!order.productionId && currentProductionId) {
+                            order.productionId = currentProductionId;
+                        }
+                        allOrders.push(order);
+                        totalCA += order.paymentReceived || 0;
+                    });
+                    
+                    allOrders.sort((a, b) => {
+                        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+                        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+                        return dateB - dateA;
+                    });
+                    
+                    document.getElementById('totalOrders').textContent = allOrders.length;
+                    document.getElementById('pendingOrders').textContent = allOrders.filter(o => o.status === 'en_attente').length;
+                    document.getElementById('deliveringOrders').textContent = allOrders.filter(o => o.status === 'en_livraison').length;
+                    document.getElementById('deliveredOrders').textContent = allOrders.filter(o => o.status === 'livre').length;
+                    document.getElementById('totalRevenue').textContent = totalCA.toLocaleString('fr-FR') + ' F CFA';
+                    
+                    filterOrders();
+                }, (error) => {
+                    console.error('Erreur Firestore:', error);
+                });
+        }
+
+        // Événements filtres
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.onclick = () => {
+                if (btn.id === 'selectProductionBtn') {
+                    openProductionModal();
+                    return;
+                }
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.getAttribute('data-status');
+                filterOrders();
+            };
+        });
+
         // Navigation sidebar
         document.querySelectorAll('.nav-item').forEach(item => {
             item.onclick = () => {
                 document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
                 const section = item.getAttribute('data-section');
-                if (section === 'stats') {
-                    document.querySelector('.stats-grid').style.display = 'grid';
-                } else {
-                    document.querySelector('.stats-grid').style.display = 'grid';
+                if (section === 'production') {
+                    openProductionModal();
                 }
             };
         });
+
+        // Démarrer l'application
+        init();
     </script>
 </body>
 </html>
