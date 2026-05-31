@@ -539,6 +539,7 @@
                             <button class="btn-action btn-livraison" onclick="updateStatus('${order.id}', 'en_livraison')">🚚 Livraison</button>
                             <button class="btn-action btn-livre" onclick="updateStatus('${order.id}', 'livre')">✅ Livrée</button>
                             <button class="btn-action btn-payer" onclick="openPaymentModal('${order.id}', ${order.total || 0})">💰 Payer</button>
+                            
                             <button class="btn-action btn-details" onclick="viewDetails('${order.id}')">📋 Détails</button>
                             <button class="btn-action btn-pdf" onclick="generateOrderPDF('${order.id}')">📄 PDF</button>
                                                         <button class="btn-action btn-cancel-order" onclick="cancelOrder('${order.id}')" style="background:#f59e0b;">❌ Annuler</button>
@@ -582,97 +583,203 @@
             }
         }
 
-               function openPaymentModal(orderId, total) {
-            db.collection('orders').doc(orderId).get().then(doc => {
-                if (!doc.exists) return;
+         function openPaymentModal(orderId, total) {
+    db.collection('orders').doc(orderId).get().then(doc => {
+        if (!doc.exists) return;
+        
+        const order = doc.data();
+        const montantActuel = order.paymentReceived || 0;
+        const modeActuel = order.paymentMethod || 'especes';
+        
+        // Créer une modal personnalisée
+        const modalDiv = document.createElement('div');
+        modalDiv.className = 'payment-modal';
+        modalDiv.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+        `;
+        
+        modalDiv.innerHTML = `
+            <div style="background: white; border-radius: 20px; padding: 25px; width: 90%; max-width: 400px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0;"><i class="fas fa-money-bill-wave"></i> Enregistrer le paiement</h3>
+                    <button onclick="this.closest('.payment-modal').remove()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+                </div>
                 
-                const order = doc.data();
-                const montantActuel = order.paymentReceived || 0;
+                <p><strong>Total commande:</strong> ${total.toLocaleString('fr-FR')} F CFA</p>
+                <p><strong>Déjà payé:</strong> ${montantActuel.toLocaleString('fr-FR')} F CFA</p>
+                <p><strong>Reste à payer:</strong> <span style="color: #f59e0b; font-weight: bold;">${(total - montantActuel).toLocaleString('fr-FR')} F CFA</span></p>
                 
-                const message = `Montant actuel: ${montantActuel.toLocaleString('fr-FR')} F CFA\nTotal commande: ${total.toLocaleString('fr-FR')} F CFA\n\nNouveau montant payé (écrase l'ancien) :`;
-                const payment = prompt(message, montantActuel);
+                <div style="margin: 20px 0;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">💰 Mode de paiement :</label>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 5px; background: #f0f0f0; padding: 10px 15px; border-radius: 10px; cursor: pointer;">
+                            <input type="radio" name="paymentMethod" value="especes" ${modeActuel === 'especes' ? 'checked' : ''}> 💵 Espèces
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; background: #f0f0f0; padding: 10px 15px; border-radius: 10px; cursor: pointer;">
+                            <input type="radio" name="paymentMethod" value="wave" ${modeActuel === 'wave' ? 'checked' : ''}> 📱 Wave
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; background: #f0f0f0; padding: 10px 15px; border-radius: 10px; cursor: pointer;">
+                            <input type="radio" name="paymentMethod" value="orange" ${modeActuel === 'orange' ? 'checked' : ''}> 📱 Orange Money
+                        </label>
+                    </div>
+                </div>
                 
-                if (payment !== null) {
-                    let newAmount = parseInt(payment);
-                    if (isNaN(newAmount)) newAmount = 0;
-                    if (newAmount < 0) newAmount = 0;
-                    
-                    let paymentStatus = 'impaye';
-                    let paymentRemaining = total - newAmount;
-                    
-                    if (newAmount >= total) {
-                        paymentStatus = 'paye';
-                        paymentRemaining = 0;
-                    } else if (newAmount > 0) {
-                        paymentStatus = 'partiel';
-                    }
-                    
-                    db.collection('orders').doc(orderId).update({
-                        paymentStatus: paymentStatus,
-                        paymentReceived: newAmount,
-                        paymentRemaining: paymentRemaining,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    }).then(() => {
-                        syncToInvoice(orderId); // ← AJOUTE CETTE LIGNE
-                        showToast(`💰 Montant payé: ${newAmount.toLocaleString('fr-FR')} F CFA | Reste: ${paymentRemaining.toLocaleString('fr-FR')} F CFA`);
-                    }).catch(error => {
-                        showToast('Erreur: ' + error.message, 'error');
-                    });
-                }
-            }).catch(error => {
-                console.error('Erreur:', error);
-                showToast('Erreur lors du chargement de la commande', 'error');
-            });
-        }
-        // ========== SYNCHRONISATION AVEC LES FACTURES ==========
-        async function syncToInvoice(orderId) {
-            try {
-                const orderDoc = await db.collection('orders').doc(orderId).get();
-                if (!orderDoc.exists) return;
+                <div style="margin: 20px 0;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: bold;">💰 Montant payé (F CFA) :</label>
+                    <input type="number" id="paymentAmount" value="${montantActuel}" min="0" max="${total}" step="100" 
+                           style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 1rem;">
+                </div>
                 
-                const order = orderDoc.data();
-                
-                // Vérifier si une facture existe déjà
-                const existingInvoice = await db.collection('invoices')
-                    .where('orderId', '==', orderId)
-                    .get();
-                
-                const invoiceData = {
-                    orderId: orderId,
-                    boutique: 'en-ligne',
-                    boutiqueName: 'TIKTOK SHOP',
-                    boutiquePhone: '77 777 77 82',
-                    client: order.client || { name: 'Client TikTok', phone: 'Non renseigné' },
-                    items: order.items || [],
-                    total: order.total || 0,
-                    invoiceNumber: order.orderNumber || `INV-${orderId.slice(0,8)}`,
-                    paiement: {
-                        montantPaye: order.paymentReceived || 0,
-                        resteAPayer: (order.paymentRemaining || order.total || 0),
-                        modePaiement: order.paymentMethod || 'especes',
-                        statut: order.paymentStatus || 'impaye',
-                        datePaiement: new Date().toISOString()
-                    },
-                    status: order.status === 'livre' ? 'completed' : 'pending',
-                    productionId: order.productionId || null,
-                    createdAt: order.createdAt || firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                if (!existingInvoice.empty) {
-                    // Mettre à jour la facture existante
-                    const invoiceId = existingInvoice.docs[0].id;
-                    await db.collection('invoices').doc(invoiceId).update(invoiceData);
-                    console.log('✅ Facture mise à jour:', invoiceId);
-                } else {
-                    // Créer une nouvelle facture
-                    const newInvoice = await db.collection('invoices').add(invoiceData);
-                    console.log('✅ Nouvelle facture créée:', newInvoice.id);
-                }
-            } catch (error) {
-                console.error('Erreur synchro facture:', error);
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button id="savePaymentBtn" style="flex: 1; background: #10b981; color: white; border: none; padding: 12px; border-radius: 10px; cursor: pointer;">
+                        <i class="fas fa-save"></i> Enregistrer
+                    </button>
+                    <button onclick="this.closest('.payment-modal').remove()" style="flex: 1; background: #666; color: white; border: none; padding: 12px; border-radius: 10px; cursor: pointer;">
+                        Annuler
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modalDiv);
+        
+        // Gestionnaire pour le bouton Enregistrer
+        document.getElementById('savePaymentBtn').onclick = () => {
+            const newAmount = parseInt(document.getElementById('paymentAmount').value) || 0;
+            const selectedMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+            
+            let paymentStatus = 'impaye';
+            let paymentRemaining = total - newAmount;
+            
+            if (newAmount >= total) {
+                paymentStatus = 'paye';
+                paymentRemaining = 0;
+            } else if (newAmount > 0) {
+                paymentStatus = 'partiel';
             }
+            
+            // Afficher le mode sélectionné dans la console pour vérifier
+            console.log('💰 Mode sélectionné:', selectedMethod);
+            
+            db.collection('orders').doc(orderId).update({
+                paymentStatus: paymentStatus,
+                paymentReceived: newAmount,
+                paymentRemaining: paymentRemaining,
+                paymentMethod: selectedMethod,  // ← valeur correcte: 'especes', 'wave', ou 'orange'
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                syncToInvoice(orderId);
+                let modeTexte = '';
+                if (selectedMethod === 'especes') modeTexte = 'Espèces';
+                else if (selectedMethod === 'wave') modeTexte = 'Wave';
+                else if (selectedMethod === 'orange') modeTexte = 'Orange Money';
+                
+                showToast(`💰 ${newAmount.toLocaleString('fr-FR')} F CFA - Mode: ${modeTexte} | Reste: ${paymentRemaining.toLocaleString('fr-FR')} F CFA`);
+                modalDiv.remove();
+            }).catch(error => {
+                showToast('Erreur: ' + error.message, 'error');
+            });
+        };
+        
+    }).catch(error => {
+        console.error('Erreur:', error);
+        showToast('Erreur lors du chargement de la commande', 'error');
+    });
+}
+      
+      // Fonction pour créer une commande avec mode de paiement
+async function createOrderWithPayment(clientInfo, items, total, paymentMethod = 'especes', paymentReceived = 0) {
+    const orderData = {
+        boutique: 'en-ligne',
+        client: clientInfo,
+        items: items,
+        total: total,
+        paymentMethod: paymentMethod,
+        paymentReceived: paymentReceived,
+        paymentStatus: paymentReceived >= total ? 'paye' : (paymentReceived > 0 ? 'partiel' : 'impaye'),
+        paymentRemaining: total - paymentReceived,
+        status: 'en_attente',
+        orderNumber: generateOrderNumber(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        productionId: currentProductionId,
+        productionName: currentProductionName
+    };
+    
+    const docRef = await db.collection('orders').add(orderData);
+    await syncToInvoice(docRef.id);
+    return docRef.id;
+}
+        // ========== SYNCHRONISATION AVEC LES FACTURES ==========
+       // ========== SYNCHRONISATION AVEC LES FACTURES (CORRIGÉE) ==========
+async function syncToInvoice(orderId) {
+    try {
+        const orderDoc = await db.collection('orders').doc(orderId).get();
+        if (!orderDoc.exists) return;
+        
+        const order = orderDoc.data();
+        
+        // CORRECTION ICI : Bien mapper le mode de paiement
+        let modePaiement = 'especes'; // valeur par défaut
+        if (order.paymentMethod === 'wave') {
+            modePaiement = 'wave';
+        } else if (order.paymentMethod === 'orange') {
+            modePaiement = 'orange';
+        } else if (order.paymentMethod === 'especes') {
+            modePaiement = 'especes';
         }
+        
+        // Vérifier si une facture existe déjà
+        const existingInvoice = await db.collection('invoices')
+            .where('orderId', '==', orderId)
+            .get();
+        
+        const invoiceData = {
+            orderId: orderId,
+            boutique: 'en-ligne',
+            boutiqueName: 'TIKTOK SHOP',
+            boutiquePhone: '77 777 77 82',
+            client: order.client || { name: 'Client TikTok', phone: 'Non renseigné' },
+            items: order.items || [],
+            total: order.total || 0,
+            invoiceNumber: order.orderNumber || `INV-${orderId.slice(0,8)}`,
+            paiement: {
+                montantPaye: order.paymentReceived || 0,
+                resteAPayer: (order.paymentRemaining || order.total || 0),
+                modePaiement: modePaiement,  // ← CORRIGÉ
+                statut: order.paymentStatus || 'impaye',
+                datePaiement: new Date().toISOString()
+            },
+            status: order.status === 'livre' ? 'completed' : 'pending',
+            productionId: order.productionId || null,
+            createdAt: order.createdAt || firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        if (!existingInvoice.empty) {
+            // Mettre à jour la facture existante
+            const invoiceId = existingInvoice.docs[0].id;
+            await db.collection('invoices').doc(invoiceId).update(invoiceData);
+            console.log('✅ Facture mise à jour avec mode:', modePaiement);
+        } else {
+            // Créer une nouvelle facture
+            const newInvoice = await db.collection('invoices').add(invoiceData);
+            console.log('✅ Nouvelle facture créée avec mode:', modePaiement);
+        }
+    } catch (error) {
+        console.error('Erreur synchro facture:', error);
+    }
+}
+      
         async function viewDetails(orderId) {
             const doc = await db.collection('orders').doc(orderId).get();
             if (!doc.exists) return;
@@ -1185,12 +1292,104 @@ async function cancelOrder(orderId) {
     }
 }
       
-      
+      // ========== PAIEMENT RAPIDE AVEC MODE ==========
+async function quickPayment(orderId) {
+    const doc = await db.collection('orders').doc(orderId).get();
+    if (!doc.exists) return;
+    
+    const order = doc.data();
+    const total = order.total || 0;
+    const reste = total - (order.paymentReceived || 0);
+    
+    if (reste <= 0) {
+        showToast('Cette commande est déjà entièrement payée', 'warning');
+        return;
+    }
+    
+    const modalDiv = document.createElement('div');
+    modalDiv.className = 'payment-modal';
+    modalDiv.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+    `;
+    
+    modalDiv.innerHTML = `
+        <div style="background: white; border-radius: 20px; padding: 25px; width: 90%; max-width: 400px;">
+            <h3 style="margin-bottom: 15px;">💰 Paiement restant</h3>
+            <p><strong>Reste à payer:</strong> <span style="color: #f59e0b; font-size: 1.2rem;">${reste.toLocaleString('fr-FR')} F CFA</span></p>
+            
+            <div style="margin: 15px 0;">
+                <label>Mode de paiement :</label>
+                <select id="quickPaymentMethod" style="width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #ddd;">
+                    <option value="especes">💵 Espèces</option>
+                    <option value="wave">📱 Wave</option>
+                    <option value="orange">📱 Orange Money</option>
+                </select>
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <label>Montant à payer :</label>
+                <input type="number" id="quickPaymentAmount" value="${reste}" min="0" max="${reste}" step="100" 
+                       style="width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #ddd;">
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="confirmQuickPayment" style="flex: 1; background: #10b981; color: white; border: none; padding: 12px; border-radius: 10px; cursor: pointer;">
+                    Confirmer
+                </button>
+                <button onclick="this.closest('.payment-modal').remove()" style="flex: 1; background: #666; color: white; border: none; padding: 12px; border-radius: 10px; cursor: pointer;">
+                    Annuler
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modalDiv);
+    
+    document.getElementById('confirmQuickPayment').onclick = async () => {
+        const payAmount = parseInt(document.getElementById('quickPaymentAmount').value) || 0;
+        const method = document.getElementById('quickPaymentMethod').value;
+        const nouveauTotalPaye = (order.paymentReceived || 0) + payAmount;
+        
+        let paymentStatus = 'impaye';
+        if (nouveauTotalPaye >= total) {
+            paymentStatus = 'paye';
+        } else if (nouveauTotalPaye > 0) {
+            paymentStatus = 'partiel';
+        }
+        
+        console.log('💰 Mode sélectionné (quick):', method);
+        
+        await db.collection('orders').doc(orderId).update({
+            paymentReceived: nouveauTotalPaye,
+            paymentRemaining: total - nouveauTotalPaye,
+            paymentStatus: paymentStatus,
+            paymentMethod: method,  // ← valeur correcte
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        await syncToInvoice(orderId);
+        
+        let modeTexte = method === 'especes' ? 'Espèces' : (method === 'wave' ? 'Wave' : 'Orange Money');
+        showToast(`✅ ${payAmount.toLocaleString('fr-FR')} F CFA payés par ${modeTexte}`);
+        modalDiv.remove();
+    };
+}
         // Démarrer l'application
         init();
       // ========== ÉCOUTE DES COMMANDES TIKTOK SHOP (orders) ==========
 let ordersUnsubscribe = null;
 
+      
+      
 async function listenToTikTokOrders() {
     if (ordersUnsubscribe) {
         ordersUnsubscribe();
