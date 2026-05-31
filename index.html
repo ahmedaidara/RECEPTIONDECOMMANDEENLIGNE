@@ -523,15 +523,15 @@
                         <td>${order.client?.phone || 'N/A'}</td>
                         <td style="font-weight: bold; color: #f5a623;">${(order.total || 0).toLocaleString('fr-FR')} F CFA</td>
                         <td>
-                            <select onchange="updateOrderProduction('${order.id}', this.value)" 
-                                    style="padding: 5px; border-radius: 5px; border: 1px solid #ddd; background: white; font-size: 0.7rem;">
-                                ${allProductions.map(prod => `
-                                    <option value="${prod.id}" ${(order.productionId || currentProductionId) === prod.id ? 'selected' : ''}>
-                                        ${prod.name.substring(0, 25)}
-                                    </option>
-                                `).join('')}
-                                ${allProductions.length === 0 ? '<option value="">Chargement...</option>' : ''}
-                            </select>
+                          
+<select onchange="updateOrderProduction('${order.id}', this.value)" 
+        style="padding: 5px; border-radius: 5px; border: 1px solid #ddd; background: white; font-size: 0.7rem;">
+    ${allProductions.map(prod => `
+        <option value="${prod.id}" ${(order.productionId || currentProductionId) === prod.id ? 'selected' : ''}>
+            ${prod.name.substring(0, 25)}
+        </option>
+    `).join('')}
+</select>
                         </td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td><span class="payment-badge ${paymentClass}">${paymentText}</span></td>
@@ -870,23 +870,46 @@ async function syncToInvoice(orderId) {
             }
         }
         
-        async function selectProduction(stockId, productionId, productionName) {
-            currentProductionId = productionId;
-            currentProductionData = { stockId, productionId, productionName };
-            closeProductionModal();
-            showToast(`Production sélectionnée: ${productionName}`);
-            
-            const prodBtn = document.querySelector('#selectProductionBtn');
-            if (prodBtn) {
-                prodBtn.innerHTML = `<i class="fas fa-check"></i> ${productionName.substring(0, 20)}`;
-                prodBtn.style.background = '#10b981';
-            }
+       // Modifie la fonction selectProduction dans l'admin TikTok
+async function selectProduction(stockId, productionId, productionName) {
+    currentProductionId = productionId;
+    currentProductionData = { stockId, productionId, productionName };
+    closeProductionModal();
+    showToast(`Production sélectionnée: ${productionName}`);
+    
+    // 🔥 IMPORTANT: Mettre à jour TOUTES les commandes TikTok avec ce stockId
+    const ordersSnapshot = await db.collection('orders')
+        .where('boutique', '==', 'en-ligne')
+        .get();
+    
+    let count = 0;
+    for (const doc of ordersSnapshot.docs) {
+        const order = doc.data();
+        if (!order.stockAttribueId) {
+            await db.collection('orders').doc(doc.id).update({
+                stockAttribueId: stockId,
+                productionId: productionId,
+                productionName: productionName
+            });
+            count++;
         }
+    }
+    
+    if (count > 0) {
+        showToast(`✅ ${count} commandes mises à jour avec la production`);
+    }
+    
+    const prodBtn = document.querySelector('#selectProductionBtn');
+    if (prodBtn) {
+        prodBtn.innerHTML = `<i class="fas fa-check"></i> ${productionName.substring(0, 20)}`;
+        prodBtn.style.background = '#10b981';
+    }
+}
         
         function closeProductionModal() {
             document.getElementById('productionModal').classList.remove('active');
         }
-
+ 
         async function generateOrderPDF(orderId) {
             const doc = await db.collection('orders').doc(orderId).get();
             if (!doc.exists) return;
@@ -1560,4 +1583,4 @@ window.renderDashboardMetrics = function() {
 }
     </script>
 </body>
-</html>
+</html> 
