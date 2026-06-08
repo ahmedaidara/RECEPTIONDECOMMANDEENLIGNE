@@ -457,36 +457,48 @@
         let currentProductionData = null;
 
         // ========== CHARGEMENT DES PRODUCTIONS ==========
-        async function loadProductions() {
-            try {
-                const snapshot = await db.collection('stocks_attribues')
-                    .where('boutique', '==', 'en-ligne')
-                    .get();
+       async function loadProductions() {
+    try {
+        const snapshot = await db.collection('stocks_attribues')
+            .where('boutique', '==', 'en-ligne')
+            .get();
+        
+        allProductions = [];
+        for (const doc of snapshot.docs) {
+            const stock = doc.data();
+            const prodDoc = await db.collection('poulailler_records').doc(stock.productionId).get();
+            if (prodDoc.exists) {
+                const production = prodDoc.data();
+                const date = production.startDate ? new Date(production.startDate) : new Date();
+                const dateStr = `${date.getDate()}/${date.getMonth()+1}/${date.getFullYear()}`;
                 
-                allProductions = [];
-                for (const doc of snapshot.docs) {
-                    const stock = doc.data();
-                    const prodDoc = await db.collection('poulailler_records').doc(stock.productionId).get();
-                    if (prodDoc.exists) {
-                        allProductions.push({
-                            id: stock.productionId,
-                            stockId: doc.id,
-                            name: prodDoc.data().productionName || `Production du ${new Date(prodDoc.data().startDate).toLocaleDateString('fr-FR')}`,
-                            date: prodDoc.data().startDate
-                        });
-                    }
-                }
+                // Calculer le stock restant
+                const stockTotal = stock.total || 0;
+                const stockVendu = stock.totalSold || 0;
+                const stockRestant = stockTotal - stockVendu;
                 
-                allProductions.sort((a, b) => new Date(b.date) - new Date(a.date));
-                
-                if (allProductions.length > 0) {
-                    currentProductionId = allProductions[0].id;
-                    console.log('Production par défaut:', currentProductionId);
-                }
-            } catch (error) {
-                console.error('Erreur chargement productions:', error);
+                allProductions.push({
+                    id: stock.productionId,
+                    stockId: doc.id,
+                    name: production.productionName || `Production du ${dateStr}`,
+                    date: production.startDate,
+                    total: stockTotal,
+                    vendu: stockVendu,
+                    stockRestant: stockRestant
+                });
             }
         }
+        
+        allProductions.sort((a, b) => new Date(b.date) - new Date(a.date));
+        console.log('✅ Productions chargées:', allProductions.length);
+        
+        if (allProductions.length > 0) {
+            currentProductionId = allProductions[0].id;
+        }
+    } catch (error) {
+        console.error('Erreur chargement productions:', error);
+    }
+}
 
         // ========== AFFICHAGE DES COMMANDES ==========
         function displayOrders(orders) {
@@ -524,14 +536,21 @@
                         <td style="font-weight: bold; color: #f5a623;">${(order.total || 0).toLocaleString('fr-FR')} F CFA</td>
                         <td>
                           
-<select onchange="updateOrderProduction('${order.id}', this.value)" 
-        style="padding: 5px; border-radius: 5px; border: 1px solid #ddd; background: white; font-size: 0.7rem;">
+<select id="prodSelect_${order.id}" 
+        onchange="updateOrderProduction('${order.id}', this.value, this.options[this.selectedIndex].getAttribute('data-stock-id'), this.options[this.selectedIndex].getAttribute('data-name'))" 
+        style="padding: 8px; border-radius: 8px; border: 2px solid ${!order.productionId ? '#f5a623' : '#10b981'}; background: ${!order.productionId ? '#fffaf5' : '#f0fdf4'}; font-size: 0.75rem; font-weight: bold; cursor: pointer; min-width: 180px;">
+    <option value="">⚠️ Sélectionner une production</option>
     ${allProductions.map(prod => `
-        <option value="${prod.id}" ${(order.productionId || currentProductionId) === prod.id ? 'selected' : ''}>
-            ${prod.name.substring(0, 25)}
+        <option value="${prod.id}" 
+                data-stock-id="${prod.stockId}"
+                data-name="${prod.name}"
+                ${order.productionId === prod.id ? 'selected' : ''}
+                style="${order.productionId === prod.id ? 'background: #d1fae5;' : ''}">
+            ${prod.name} (${prod.stockRestant || '?'} restants)
         </option>
     `).join('')}
 </select>
+${!order.productionId ? '<span style="display: inline-block; margin-left: 8px; background: #fef3c7; color: #d97706; padding: 2px 6px; border-radius: 10px; font-size: 0.65rem;">⚠️ à assigner</span>' : '<span style="display: inline-block; margin-left: 8px; color: #10b981; font-size: 0.65rem;"><i class="fas fa-check-circle"></i> assignée</span>'}
                         </td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td><span class="payment-badge ${paymentClass}">${paymentText}</span></td>
@@ -568,20 +587,67 @@
             showToast(`Statut mis à jour: ${newStatus === 'en_livraison' ? 'En livraison' : 'Livrée'}`);
         }
 
-        async function updateOrderProduction(orderId, productionId) {
-            try {
-                const prod = allProductions.find(p => p.id === productionId);
-                await db.collection('orders').doc(orderId).update({
-                    productionId: productionId,
-                    productionName: prod?.name || productionId,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                showToast(`Production mise à jour: ${prod?.name || productionId}`);
-            } catch (error) {
-                console.error('Erreur:', error);
-                showToast('Erreur lors de la mise à jour', 'error');
-            }
+      async function updateOrderProduction(orderId, productionId, stockId, productionName) {
+    if (!productionId) {
+        showToast('❌ Veuillez sélectionner une production valide', 'error');
+        return;
+    }
+    
+    try {
+        // Récupérer les infos de la production pour vérifier le stock
+        const stockDoc = await db.collection('stocks_attribues').doc(stockId).get();
+        if (!stockDoc.exists) {
+            showToast('❌ Production non trouvée', 'error');
+            return;
         }
+        
+        const stockData = stockDoc.data();
+        const stockRestant = (stockData.total || 0) - (stockData.totalSold || 0);
+        
+        // Récupérer la commande pour connaître la quantité
+        const orderDoc = await db.collection('orders').doc(orderId).get();
+        const order = orderDoc.data();
+        
+        // Calculer la quantité totale de la commande
+        const orderQuantity = order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+        
+        // Vérifier si le stock est suffisant
+        if (orderQuantity > stockRestant) {
+            showToast(`⚠️ Stock insuffisant ! Il reste ${stockRestant} poulets, commande: ${orderQuantity}`, 'error');
+            return;
+        }
+        
+        // Mettre à jour la commande
+        await db.collection('orders').doc(orderId).update({
+            productionId: productionId,
+            stockAttribueId: stockId,
+            productionName: productionName,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Mettre à jour l'affichage du sélecteur
+        const select = document.getElementById(`prodSelect_${orderId}`);
+        if (select) {
+            select.style.border = '2px solid #10b981';
+            select.style.background = '#f0fdf4';
+        }
+        
+        // Mettre à jour le stock vendu
+        await db.collection('stocks_attribues').doc(stockId).update({
+            totalSold: firebase.firestore.FieldValue.increment(orderQuantity),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        showToast(`✅ Production assignée: ${productionName} (${orderQuantity} poulet(s))`, 'success');
+        
+        // Rafraîchir l'affichage
+        filterOrders();
+        
+    } catch (error) {
+        console.error('Erreur:', error);
+        showToast('❌ Erreur: ' + error.message, 'error');
+    }
+}
 
          function openPaymentModal(orderId, total) {
     db.collection('orders').doc(orderId).get().then(doc => {
